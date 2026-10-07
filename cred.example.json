@@ -1,0 +1,6 @@
+{
+  "email": "you@example.com",
+  "password": "your-account-password",
+  "imap_email": "your-inbox@gmail.com",
+  "imap_password": "your-16-char-app-password"
+}

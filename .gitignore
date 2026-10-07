@@ -1,0 +1,22 @@
+# Secrets — never commit
+cred.json
+auth.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Generated artifacts
+out/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

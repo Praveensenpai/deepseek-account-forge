@@ -1,0 +1,41 @@
+[project]
+name = "deepseek-account-forge"
+version = "0.1.0"
+description = "Full DeepSeek account lifecycle automation: signup, signin, age gate, token verify, delete"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "patchright>=1.49.0",
+    "httpx>=0.28.0",
+]
+
+[project.scripts]
+deepseek-forge = "deepseek_account_forge.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deepseek_account_forge"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not integration'"
+markers = [
+    "integration: needs a real browser and network; excluded by default",
+]
