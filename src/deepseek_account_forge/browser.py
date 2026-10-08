@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,9 +33,42 @@ class LaunchOptions:
         return cls(headless=headless, user_data_dir=user_data_dir)
 
 
+def _sanitize_preferences(user_data_dir: Path) -> None:
+    """Patch Chrome prefs that trigger first-run and restore prompts.
+
+    Chrome rewrites Preferences on exit, so a fresh or abruptly-closed profile
+    shows the restore bubble, the save-password prompt, and the default-browser
+    check on the next launch. Patching the file before launch keeps the window
+    quiet. Failures are non-fatal: a missing or unreadable file is skipped.
+    """
+    prefs_path = user_data_dir / "Default" / "Preferences"
+    if not prefs_path.exists():
+        return
+    try:
+        prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    prefs.setdefault("profile", {}).update(
+        {
+            "exit_type": "Normal",
+            "exited_cleanly": True,
+            "password_manager_enabled": False,
+        }
+    )
+    prefs["credentials_enable_service"] = False
+    prefs.setdefault("browser", {}).update(
+        {
+            "has_seen_welcome_page": True,
+            "check_default_browser": False,
+        }
+    )
+    prefs_path.write_text(json.dumps(prefs), encoding="utf-8")
+
+
 def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserContext:
     """Launch a persistent Chromium context tuned for stealth."""
     options.user_data_dir.mkdir(parents=True, exist_ok=True)
+    _sanitize_preferences(options.user_data_dir)
     context = playwright.chromium.launch_persistent_context(
         user_data_dir=str(options.user_data_dir),
         headless=options.headless,
@@ -48,6 +82,10 @@ def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserCon
         args=[
             "--disable-blink-features=AutomationControlled",
             f"--window-size={DEFAULT_VIEWPORT['width']},{DEFAULT_VIEWPORT['height']}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--hide-crash-restore-bubble",
+            "--password-store=basic",
         ],
     )
     context.set_default_timeout(options.timeout_ms)

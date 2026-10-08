@@ -31,8 +31,14 @@ def _slug(url: str) -> str:
 
 
 def open_page(context: BrowserContext, url: str, wait_until: str = "networkidle") -> Page:
-    """Open a URL in a new page and wait for load."""
-    page = context.new_page()
+    """Open a URL in a page and wait for load.
+
+    Reuses the context's initial blank tab when one is present, so a persistent
+    profile does not end up with a stray about:blank tab beside the target page.
+    """
+    page = next((p for p in context.pages if p.url in ("", "about:blank")), None)
+    if page is None:
+        page = context.new_page()
     page.goto(url, wait_until=wait_until)
     return page
 

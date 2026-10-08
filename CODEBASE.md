@@ -11,7 +11,7 @@ DeepSeek account forge automation for `chat.deepseek.com`. Handles the full life
 - Python >=3.11, managed by `uv`
 - `patchright` (patched Playwright, stealth Chromium)
 - `httpx` (token verification)
-- `ruff` + `pytest` (dev)
+- `ruff` (dev)
 
 ## Layout
 
@@ -42,8 +42,10 @@ src/deepseek_account_forge/
 - `DEFAULT_VIEWPORT: dict` = 1280x900
 - `@dataclass LaunchOptions` — `headless`, `user_data_dir`, `timeout_ms`, `locale`, `timezone`
   - `from_env() -> LaunchOptions` — reads `HEADLESS`, `STEALTH_PROFILE`
+- `_sanitize_preferences(user_data_dir) -> None` — patches `Default/Preferences` before launch: `exit_type=Normal`, `exited_cleanly=true`, `password_manager_enabled=false`, `credentials_enable_service=false`, `has_seen_welcome_page=true`, `check_default_browser=false`. Non-fatal on missing/unreadable file. Silences restore, save-password, and default-browser prompts.
 - `launch_context(playwright, options) -> BrowserContext` — persistent Chromium, stealth args
   - pins `viewport=DEFAULT_VIEWPORT` (not `no_viewport`) so the left rail renders on-screen; some window managers ignore `--window-size` and collapse the sidebar to negative x
+  - quiet-launch flags: `--no-first-run`, `--no-default-browser-check`, `--hide-crash-restore-bubble`, `--password-store=basic`
 - `open_session(options?) -> ContextManager[BrowserContext]`
 
 Depends: patchright.
@@ -51,7 +53,7 @@ Depends: patchright.
 ### navigate.py
 - `DEFAULT_OUT_DIR: Path` = `out`
 - `@dataclass Capture` — `url`, `final_url`, `title`, `screenshot`, `html`
-- `open_page(context, url, wait_until="networkidle") -> Page`
+- `open_page(context, url, wait_until="networkidle") -> Page` — reuses the context's initial blank tab when present, so a persistent profile does not accumulate a stray about:blank tab
 - `wait_for_selector(page, selector, timeout_ms=60000) -> bool` — non-raising wait
 - `capture(page, url, out_dir) -> Capture` — screenshot + HTML dump
 - `extract(page, selectors) -> dict[str, list[str]]` — text/value/placeholder/aria-label
@@ -164,14 +166,6 @@ Depends: navigate.
 
 Depends: auth_wait, state.
 
-### tests/ (unit, offline)
-- `test_credentials.py` — load/validate cred.json
-- `test_token.py` — envelope unwrap, polling, save
-- `test_verify.py` — **pins the 200 + code:40003 false positive**
-- `test_auth_wait.py` — outcome classification (success/block/error/timeout)
-- `test_identity.py` — mask rule + mismatch-clears + fails-closed
-- `test_signup.py` — integration (marked `integration`, deselected by default)
-
 ### cli.py
 - `DEFAULT_URL="https://chat.deepseek.com/sign_up"`, `SIGNIN_URL="https://chat.deepseek.com/sign_in"`, `CHAT_URL="https://chat.deepseek.com"`
 - Per-flow default URLs: `--login` -> `SIGNIN_URL`, `--register` -> `SIGNUP_URL`, plain run -> `CHAT_URL`; an explicit positional URL overrides
@@ -214,7 +208,6 @@ Depends: all modules above.
 
 ```bash
 uv run ruff format . && uv run ruff check . && uv run ruff format --check .
-uv run pytest -q
 uv run deepseek-forge --login
 uv run deepseek-forge --register
 uv run deepseek-forge --delete-account          # safe dry run
