@@ -8,7 +8,7 @@ Create and manage DeepSeek accounts from your terminal.
 - **Log in** — signs in and saves your access token to `auth.json`.
 - **Delete an account** — walks to the delete dialog, with an optional flag to actually confirm.
 
-That's it. No manual clicking through the site.
+Everything is automatic except the signup captcha, which you solve once in the browser.
 
 ## Install
 
@@ -41,6 +41,10 @@ cp cred.example.json cred.json
 `imap_email` and `imap_password` are optional. Add them if you want the tool to read the signup code from your Gmail inbox automatically. Without them, you type the code in yourself.
 
 To get a Gmail App Password: turn on 2-Step Verification, then create one at https://myaccount.google.com/apppasswords.
+
+## Captcha
+
+Creating an account needs one manual step: when the hCaptcha appears, solve it in the browser window yourself. The tool waits for you to finish, then continues. Everything else (form, email code, age gate, token) is automatic.
 
 ## Usage
 
