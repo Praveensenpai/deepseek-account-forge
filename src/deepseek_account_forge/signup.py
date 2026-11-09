@@ -10,6 +10,7 @@ from patchright.sync_api import Page
 from .age import complete_age_if_present
 from .auth_wait import require_success
 from .credentials import Credentials
+from .identity import reset_device_fingerprints
 from .otp_mail import MailConfig, OtpMailError, fetch_latest_otp
 
 EMAIL_SELECTOR = 'input[placeholder="Email address"]'
@@ -85,8 +86,9 @@ def prompt_for_otp(
 
 
 def submit_code(page: Page, code: str) -> None:
-    """Fill the OTP field and click the signup button."""
+    """Fill the OTP field and settle form state."""
     _fill(page, CODE_SELECTOR, code)
+    page.wait_for_timeout(500)
     print("[signup] filled OTP")
 
 
@@ -102,6 +104,7 @@ def run_signup(page: Page, creds: Credentials, otp: str | None = None) -> None:
     Raises AuthError when the submit does not reach a logged-in state, so a
     duplicate email, bad OTP, or Turnstile block is never reported as success.
     """
+    reset_device_fingerprints(page)
     fill_credentials(page, creds)
     # Cutoff for the OTP: only mail that arrives after this click is valid.
     requested_at = datetime.now(UTC)

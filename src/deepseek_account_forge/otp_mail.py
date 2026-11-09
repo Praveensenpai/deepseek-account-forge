@@ -16,7 +16,7 @@ import imaplib
 import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 from email.utils import parsedate_to_datetime
 
@@ -54,11 +54,11 @@ def _connect(config: MailConfig) -> imaplib.IMAP4_SSL:
 
 
 def _body_text(message: Message) -> str:
-    """Flatten a message's text parts into one string."""
+    """Flatten a message's text and html parts into one string."""
     if message.is_multipart():
         chunks = []
         for part in message.walk():
-            if part.get_content_type() == "text/plain":
+            if part.get_content_type() in ("text/plain", "text/html"):
                 payload = part.get_payload(decode=True)
                 if payload:
                     chunks.append(payload.decode(part.get_content_charset() or "utf-8", "ignore"))
@@ -113,7 +113,7 @@ def _latest_deepseek_uid(
             continue
         if since is not None:
             sent = _message_date(message)
-            if sent is None or sent < since:
+            if sent is None or sent < (since - timedelta(seconds=60)):
                 continue
         return uid.decode() if isinstance(uid, bytes) else str(uid)
     return None

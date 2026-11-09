@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,11 +26,20 @@ class LaunchOptions:
     timezone: str = "America/New_York"
 
     @classmethod
-    def from_env(cls) -> LaunchOptions:
-        """Build options from environment variables."""
+    def from_env(cls, isolated: bool = False) -> LaunchOptions:
+        """Build options from environment variables.
+
+        When isolated is True and STEALTH_PROFILE is not set, provisions a clean
+        ephemeral user_data_dir to eliminate device fingerprint tracking on signups.
+        """
         headless = os.environ.get("HEADLESS", "").lower() in {"1", "true", "yes"}
         profile = os.environ.get("STEALTH_PROFILE")
-        user_data_dir = Path(profile).expanduser() if profile else DEFAULT_USER_DATA_DIR
+        if profile:
+            user_data_dir = Path(profile).expanduser()
+        elif isolated:
+            user_data_dir = Path(tempfile.mkdtemp(prefix="deepseek-forge-reg-"))
+        else:
+            user_data_dir = DEFAULT_USER_DATA_DIR
         return cls(headless=headless, user_data_dir=user_data_dir)
 
 
@@ -86,6 +96,7 @@ def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserCon
             "--no-default-browser-check",
             "--hide-crash-restore-bubble",
             "--password-store=basic",
+            "--test-type",
         ],
     )
     context.set_default_timeout(options.timeout_ms)

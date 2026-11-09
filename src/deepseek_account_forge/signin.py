@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from patchright.sync_api import Page
 
 from .age import complete_age_if_present
 from .auth_wait import AuthError, require_success
 from .credentials import Credentials
+from .signup import prompt_for_otp
+from .state import SessionState, detect_state
 
 ACCOUNT_SELECTOR = 'input[placeholder="Phone number / email address"]'
 PASSWORD_SELECTOR = 'input[placeholder="Password"]'
 SUBMIT_SELECTOR = "div.ds-button--filled"
+VERIFY_MODAL_TEXT = "Verify your account"
+VERIFY_CODE_SELECTOR = 'input[placeholder*="verification code" i], input[placeholder*="Code" i]'
+SEND_CODE_TEXT = "Send code"
+VERIFY_SUBMIT_TEXT = "Verify and log in"
 
 
 def _fill(page: Page, selector: str, value: str) -> None:
@@ -22,12 +30,7 @@ def _fill(page: Page, selector: str, value: str) -> None:
 
 
 def fill_signin(page: Page, creds: Credentials) -> None:
-    """Fill the account and password fields.
-
-    Waits for the account field first. If the session is already authenticated,
-    /sign_in redirects to the chat home and the form never renders, so raise a
-    clear error instead of a bare 60s selector timeout.
-    """
+    """Fill the account and password fields."""
     try:
         page.wait_for_selector(ACCOUNT_SELECTOR, state="visible", timeout=15_000)
     except Exception as exc:
@@ -45,15 +48,64 @@ def click_signin(page: Page) -> None:
     print("[signin] clicked 'Log in'")
 
 
-def run_signin(page: Page, creds: Credentials) -> None:
-    """Run the full sign-in: fill, submit, verify outcome, clear age gate.
+def wait_for_signin_state(page: Page, timeout_ms: int = 15_000) -> SessionState:
+    """Poll until the page transitions from NEEDS_SIGNIN to another state."""
+    waited = 0
+    step_ms = 500
+    while waited < timeout_ms:
+        state = detect_state(page)
+        if state is not SessionState.NEEDS_SIGNIN:
+            return state
+        page.wait_for_timeout(step_ms)
+        waited += step_ms
+    return detect_state(page)
 
-    Raises AuthError when the submit does not reach a logged-in state, so a
-    Turnstile block or a bad credential is never reported as success.
-    """
+
+def handle_verify_modal_if_present(
+    page: Page, creds: Credentials, otp: str | None = None, timeout_ms: int = 10_000
+) -> bool:
+    """Detect and resolve the 'Verify your account' login challenge."""
+    try:
+        modal = page.get_by_text(VERIFY_MODAL_TEXT).first
+        subtitle = page.get_by_text("complete verification to continue logging in").first
+        if not modal.is_visible(timeout=timeout_ms) and not subtitle.is_visible(timeout=500):
+            return False
+    except Exception:
+        return False
+
+    print(f"[signin] login verification challenge triggered for {creds.email}; requesting OTP...")
+    requested_at = datetime.now(UTC)
+    send_btn = page.get_by_text(SEND_CODE_TEXT, exact=True).first
+    send_btn.click()
+    print("[signin] clicked 'Send code'; check your email for the OTP")
+
+    code = prompt_for_otp(otp, creds, since=requested_at)
+    code_field = page.locator(VERIFY_CODE_SELECTOR).first
+    code_field.wait_for(state="visible", timeout=10_000)
+    code_field.click()
+    code_field.fill("")
+    code_field.type(code, delay=25)
+    print("[signin] filled OTP")
+
+    verify_btn = page.get_by_text(VERIFY_SUBMIT_TEXT, exact=True).first
+    verify_btn.click()
+    print(f"[signin] clicked '{VERIFY_SUBMIT_TEXT}'")
+    return True
+
+
+def run_signin(page: Page, creds: Credentials, otp: str | None = None) -> None:
+    """Run the full sign-in: fill, submit, verify outcome, clear age gate."""
     fill_signin(page, creds)
     click_signin(page)
-    require_success(page, "signin")
+    state = wait_for_signin_state(page, timeout_ms=15_000)
+    if state is SessionState.NEEDS_VERIFY:
+        handle_verify_modal_if_present(page, creds, otp, timeout_ms=5_000)
+        require_success(page, "signin_verification")
+    elif state not in (SessionState.LOGGED_IN, SessionState.NEEDS_AGE):
+        if handle_verify_modal_if_present(page, creds, otp, timeout_ms=2_000):
+            require_success(page, "signin_verification")
+        else:
+            require_success(page, "signin")
     print(f"[signin] final_url={page.url}")
     if complete_age_if_present(page):
         print("[signin] age verification completed")

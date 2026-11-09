@@ -14,6 +14,7 @@ from patchright.sync_api import Page
 CHAT_INPUT_SELECTOR = "textarea"
 NEW_CHAT_TEXT = "text=New chat"
 AGE_MODAL_TEXT = "text=When were you born?"
+VERIFY_MODAL_TEXT = "text=Verify your account"
 SIGNUP_FORM_SELECTOR = 'input[placeholder="Email address"]'
 SIGNIN_FORM_SELECTOR = 'input[placeholder="Phone number / email address"]'
 
@@ -23,6 +24,7 @@ class SessionState(Enum):
 
     LOGGED_IN = "logged_in"
     NEEDS_AGE = "needs_age"
+    NEEDS_VERIFY = "needs_verify"
     NEEDS_SIGNUP = "needs_signup"
     NEEDS_SIGNIN = "needs_signin"
     UNKNOWN = "unknown"
@@ -44,6 +46,10 @@ def detect_state(page: Page) -> SessionState:
     """
     if _visible(page, AGE_MODAL_TEXT):
         return SessionState.NEEDS_AGE
+    if _visible(page, VERIFY_MODAL_TEXT) or _visible(
+        page, "text=complete verification to continue logging in"
+    ):
+        return SessionState.NEEDS_VERIFY
     if _visible(page, SIGNUP_FORM_SELECTOR):
         return SessionState.NEEDS_SIGNUP
     if _visible(page, SIGNIN_FORM_SELECTOR):

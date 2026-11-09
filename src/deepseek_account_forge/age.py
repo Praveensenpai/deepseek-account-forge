@@ -66,18 +66,31 @@ def select_option(page: Page, label: str, value: str) -> None:
 def fill_age(page: Page, year: int | None = None, month: int | None = None) -> tuple[int, int]:
     """Select a birth year and month, then click Confirm. Returns the chosen values.
 
-    Raises AgeError if either dropdown could not be set.
+    DeepSeek now defaults the modal dropdowns to 2000 and January (age >= 18).
+    If custom dropdown placeholders are present, select them; otherwise confirm
+    the pre-populated valid age.
     """
     chosen_year = year if year is not None else random_year()
     chosen_month = month if month is not None else random_month()
-    select_option(page, "Year", str(chosen_year))
-    select_option(page, "Month", str(chosen_month))
-    confirm = page.get_by_text(CONFIRM_TEXT, exact=True).first
+    try:
+        if page.locator(f"{PLACEHOLDER_SELECTOR}:has-text('Year')").is_visible(timeout=1_000):
+            select_option(page, "Year", str(chosen_year))
+        if page.locator(f"{PLACEHOLDER_SELECTOR}:has-text('Month')").is_visible(timeout=1_000):
+            select_option(page, "Month", str(chosen_month))
+    except Exception as exc:
+        print(f"[age] dropdown selection skipped ({exc}), proceeding with default date")
+
+    confirm_selectors = (
+        f"button:has-text('{CONFIRM_TEXT}'), "
+        f"div[role=button]:has-text('{CONFIRM_TEXT}'), "
+        f".ds-button:has-text('{CONFIRM_TEXT}')"
+    )
+    confirm = page.locator(confirm_selectors).first
     confirm.wait_for(state="visible", timeout=OPTION_WAIT_MS)
     confirm.click()
     # Let the submit register before callers poll for the modal to detach.
     page.wait_for_timeout(1_500)
-    print(f"[age] selected year={chosen_year} month={chosen_month} and confirmed")
+    print(f"[age] confirmed age modal (year={chosen_year} month={chosen_month})")
     return chosen_year, chosen_month
 
 
@@ -99,6 +112,7 @@ def complete_age_if_present(page: Page) -> bool:
         print("[age] modal dismissed")
     except Exception as exc:
         raise AgeError("age modal still present after confirm") from exc
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(1_000)
     print(f"[age] final_url={page.url}")
     return True

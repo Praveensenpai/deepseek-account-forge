@@ -49,17 +49,21 @@ Creating an account needs one manual step: when the hCaptcha appears, solve it i
 ## Usage
 
 ```bash
-# Create a new account
+# Create a new account (uses counter from cred.json, e.g. +10, and increments to +11 on success)
 uv run deepseek-forge --register
 
-# Log in and save the token
+# Log in with the current counter account and save the token
 uv run deepseek-forge --login
 
+# Log in with a specific account index (e.g. +9 or +10) and save its token
+uv run deepseek-forge --login -i 9
+uv run deepseek-forge --login -i 10
+
 # Start deleting an account (stops at the confirmation dialog)
-uv run deepseek-forge --delete-account
+uv run deepseek-forge --delete-account -i 10
 
 # Actually delete (irreversible)
-uv run deepseek-forge --delete-account --confirm-delete
+uv run deepseek-forge --delete-account -i 10 --confirm-delete
 ```
 
 Run it without a visible browser:
@@ -72,11 +76,15 @@ HEADLESS=1 uv run deepseek-forge --login
 
 | Flag | What it does |
 | --- | --- |
-| `--register` | Create a new account |
+| `--register` | Create a new account using the counter and auto-increment |
 | `--login` | Log in and save the token |
+| `-i`, `--index` | Specify account index for plus-addressing (e.g. `10` for `user+10@gmail.com`) |
 | `--delete-account` | Walk to the delete dialog and stop |
 | `--confirm-delete` | With `--delete-account`, confirm the deletion (**irreversible**) |
 | `--token-out` | Where to save the token (default `auth.json`) |
+| `--gateway-url` | Gateway admin tokens endpoint for deeperseeker-rs pool sync |
+| `--gateway-key` | Master admin API key for gateway sync |
+| `--no-gateway` | Disable pushing live tokens to the gateway pool |
 | `--cred` | Credentials file (default `cred.json`) |
 | `--otp` | Signup code, if you already have it |
 

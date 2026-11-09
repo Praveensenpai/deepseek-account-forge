@@ -1,6 +1,7 @@
 # Secrets — never commit
 cred.json
 auth.json
+auth_*.json
 
 # Python
 .venv/

@@ -16,6 +16,13 @@ from .state import SessionState, detect_state
 ACCOUNT_LABEL_SELECTOR = "div._9d8da05"
 SESSION_COOKIE_NAMES = ("ds_session_id",)
 SESSION_STORAGE_KEYS = ("userToken",)
+DEVICE_TRACKING_PREFIXES = (
+    "deepseek-device-id",
+    "__tea_cache",
+    "APMPLUS",
+    "__ds_remote_feature_did",
+    "hif_",
+)
 MAX_CLEAR_ATTEMPTS = 2
 
 
@@ -26,38 +33,75 @@ class IdentityMismatch(AuthError):
 def mask_email(email: str) -> str:
     """Reproduce DeepSeek's masked-email display.
 
-    Keep the first two and last two characters of the local part, replace the
-    middle with stars, and keep the domain. For short local parts, keep the
-    first character and star the rest.
+    For local parts <= 4 chars: keep first char and star the rest.
+    For local parts 5-10 chars: keep first 2 and last 2, star middle.
+    For local parts > 10 chars: keep first 3 and last 3, star middle.
     """
     local, sep, domain = email.partition("@")
     if not sep:
         return email
     if len(local) <= 4:
         masked = local[:1] + "*" * max(len(local) - 1, 0)
-    else:
+    elif len(local) <= 10:
         masked = local[:2] + "*" * (len(local) - 4) + local[-2:]
+    else:
+        masked = local[:3] + "*" * (len(local) - 6) + local[-3:]
     return f"{masked}@{domain}"
+
+
+def _matches_mask(seen: str, expected_email: str) -> bool:
+    """Check if a masked email matches expected email strictly or by pattern."""
+    if seen == mask_email(expected_email):
+        return True
+
+    seen_local, seen_sep, seen_domain = seen.partition("@")
+    exp_local, exp_sep, exp_domain = expected_email.partition("@")
+    if not seen_sep or not exp_sep or seen_domain != exp_domain:
+        return False
+    if "*" not in seen_local or len(seen_local) != len(exp_local):
+        return False
+
+    prefix = seen_local.split("*")[0]
+    suffix = seen_local.split("*")[-1]
+    return exp_local.startswith(prefix) and exp_local.endswith(suffix)
 
 
 def read_session_email(page: Page) -> str | None:
     """Return the masked email shown in the account control, or None."""
     try:
         node = page.locator(ACCOUNT_LABEL_SELECTOR).first
-        if node.is_visible(timeout=3_000):
+        if node.is_visible(timeout=5_000):
             text = (node.inner_text() or "").strip()
-            return text or None
+            if text:
+                return text
+        account_ctrl = page.locator("div._2afd28d").first
+        if account_ctrl.is_visible(timeout=2_000):
+            for line in (account_ctrl.inner_text() or "").splitlines():
+                if "@" in line:
+                    return line.strip()
     except Exception:
         return None
     return None
 
 
-def clear_account_session(context: BrowserContext, page: Page) -> None:
-    """Drop only the DeepSeek account session, keeping the HTTP cache.
+def reset_device_fingerprints(page: Page) -> None:
+    """Clear device and analytics tracking keys to prevent B11 risk device flags."""
+    prefixes_js = ", ".join(f'"{p}"' for p in DEVICE_TRACKING_PREFIXES)
+    page.evaluate(
+        f"() => {{ const prefixes = [{prefixes_js}]; "
+        "for (let i = localStorage.length - 1; i >= 0; i--) { "
+        "const key = localStorage.key(i); "
+        "if (key && prefixes.some(p => key.startsWith(p) || key.includes(p))) "
+        "localStorage.removeItem(key); } }"
+    )
 
-    A blanket clear_cookies() would also wipe the static-asset cache and force
-    a full re-download. This removes just the session cookie and the account
-    storage keys so the browser logs out without losing cached JS/CSS/images.
+
+def clear_account_session(context: BrowserContext, page: Page) -> None:
+    """Drop only the local browser session without triggering a backend logout.
+
+    This surgically removes the session cookies (ds_session_id) and localStorage/
+    sessionStorage keys directly from the browser without calling DeepSeek's logout
+    API. This ensures the extracted token remains 100% live and valid for other APIs.
     """
     for cookie in context.cookies():
         if cookie["name"] in SESSION_COOKIE_NAMES:
@@ -65,18 +109,20 @@ def clear_account_session(context: BrowserContext, page: Page) -> None:
     keys = ", ".join(f'"{k}"' for k in SESSION_STORAGE_KEYS)
     page.evaluate(
         f"() => {{ for (const k of [{keys}]) localStorage.removeItem(k); "
+        "window.sessionStorage.clear(); "
         "for (let i = localStorage.length - 1; i >= 0; i--) { "
         "const key = localStorage.key(i); "
-        "if (key && key.includes('_userStorage')) localStorage.removeItem(key); } }"
+        "if (key && (key.includes('_userStorage') || key.includes('userToken'))) "
+        "localStorage.removeItem(key); } }"
     )
 
 
 def session_matches(page: Page, expected_email: str) -> bool:
-    """True when the visible masked email equals the mask of expected_email."""
+    """True when the visible masked email matches expected_email."""
     seen = read_session_email(page)
     if seen is None:
         return False
-    return seen == mask_email(expected_email)
+    return _matches_mask(seen, expected_email)
 
 
 def ensure_matching_session(
@@ -96,12 +142,12 @@ def ensure_matching_session(
     seen = read_session_email(page)
     if seen is None:
         raise IdentityMismatch("logged in but the account label is unreadable; refusing to act")
-    if seen == mask_email(expected_email):
+    if _matches_mask(seen, expected_email):
         print(f"[identity] session matches {seen}")
         return
     print(
-        f"[identity] session is {seen} but cred.json is "
-        f"{mask_email(expected_email)}; clearing account session"
+        f"[identity] session is {seen} but target is {mask_email(expected_email)}; "
+        "removing local browser session (token preserved for other APIs)"
     )
     clear_account_session(context, page)
     page.reload(wait_until="domcontentloaded")

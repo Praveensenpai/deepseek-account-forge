@@ -85,7 +85,8 @@ def wait_for_outcome(page: Page, timeout_ms: int = SUCCESS_TIMEOUT_MS) -> AuthOu
     """
     waited = 0
     while waited < timeout_ms:
-        if detect_state(page) is SessionState.LOGGED_IN:
+        state = detect_state(page)
+        if state in (SessionState.LOGGED_IN, SessionState.NEEDS_AGE):
             return AuthOutcome(Outcome.SUCCESS)
         if _visible(page, CF_OVERLAY_SELECTOR):
             return AuthOutcome(
