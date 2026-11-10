@@ -1,9 +1,11 @@
-"""Patchright launch helpers with a persistent stealth profile."""
+"""Patchright launch helpers with ephemeral or persistent stealth profile."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,32 +17,40 @@ DEFAULT_TIMEOUT_MS = 60_000
 DEFAULT_VIEWPORT = {"width": 1280, "height": 900}
 
 
+def prune_stale_temp_profiles() -> None:
+    """Remove any orphaned deepseek-forge temporary directories in /tmp."""
+    temp_dir = Path(tempfile.gettempdir())
+    for path in temp_dir.glob("deepseek-forge-*"):
+        if path.is_dir():
+            with contextlib.suppress(Exception):
+                shutil.rmtree(path, ignore_errors=True)
+
+
 @dataclass(frozen=True)
 class LaunchOptions:
     """Configuration for a stealth browser session."""
 
     headless: bool = False
-    user_data_dir: Path = DEFAULT_USER_DATA_DIR
+    user_data_dir: Path | None = None
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     locale: str = "en-US"
     timezone: str = "America/New_York"
 
     @classmethod
-    def from_env(cls, isolated: bool = False) -> LaunchOptions:
-        """Build options from environment variables.
+    def from_env(cls, profile: Path | None = None) -> LaunchOptions:
+        """Build options from CLI flags and environment variables.
 
-        When isolated is True and STEALTH_PROFILE is not set, provisions a clean
-        ephemeral user_data_dir to eliminate device fingerprint tracking on signups.
+        If profile is provided or STEALTH_PROFILE is set, persists to that directory.
+        Otherwise defaults to None, provisioning a clean ephemeral directory.
         """
         headless = os.environ.get("HEADLESS", "").lower() in {"1", "true", "yes"}
-        profile = os.environ.get("STEALTH_PROFILE")
-        if profile:
-            user_data_dir = Path(profile).expanduser()
-        elif isolated:
-            user_data_dir = Path(tempfile.mkdtemp(prefix="deepseek-forge-reg-"))
-        else:
-            user_data_dir = DEFAULT_USER_DATA_DIR
-        return cls(headless=headless, user_data_dir=user_data_dir)
+        env_profile = os.environ.get("STEALTH_PROFILE")
+        target_dir: Path | None = None
+        if profile is not None:
+            target_dir = profile.expanduser()
+        elif env_profile:
+            target_dir = Path(env_profile).expanduser()
+        return cls(headless=headless, user_data_dir=target_dir)
 
 
 def _sanitize_preferences(user_data_dir: Path) -> None:
@@ -76,7 +86,8 @@ def _sanitize_preferences(user_data_dir: Path) -> None:
 
 
 def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserContext:
-    """Launch a persistent Chromium context tuned for stealth."""
+    """Launch a Chromium context tuned for stealth."""
+    assert options.user_data_dir is not None
     options.user_data_dir.mkdir(parents=True, exist_ok=True)
     _sanitize_preferences(options.user_data_dir)
     context = playwright.chromium.launch_persistent_context(
@@ -106,18 +117,48 @@ def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserCon
 def open_session(options: LaunchOptions | None = None):
     """Context manager yielding a stealth browser context.
 
-    Yields the context; the caller opens pages. Closes on exit.
+    Yields the context; the caller opens pages. Automatically prunes old temp
+    dirs on startup and destroys ephemeral profiles on exit unless an explicit
+    user_data_dir was specified.
     """
     opts = options or LaunchOptions.from_env()
 
     class _Session:
+        def __init__(self) -> None:
+            self._pw: Playwright | None = None
+            self._ctx: BrowserContext | None = None
+            self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
+
         def __enter__(self) -> BrowserContext:
+            prune_stale_temp_profiles()
+            if opts.user_data_dir is not None:
+                effective_dir = opts.user_data_dir
+            else:
+                self._temp_dir = tempfile.TemporaryDirectory(
+                    prefix="deepseek-forge-", ignore_cleanup_errors=True
+                )
+                effective_dir = Path(self._temp_dir.name)
+
+            effective_opts = LaunchOptions(
+                headless=opts.headless,
+                user_data_dir=effective_dir,
+                timeout_ms=opts.timeout_ms,
+                locale=opts.locale,
+                timezone=opts.timezone,
+            )
             self._pw = sync_playwright().start()
-            self._ctx = launch_context(self._pw, opts)
+            self._ctx = launch_context(self._pw, effective_opts)
             return self._ctx
 
         def __exit__(self, *exc: object) -> None:
-            self._ctx.close()
-            self._pw.stop()
+            if self._ctx is not None:
+                with contextlib.suppress(Exception):
+                    self._ctx.close()
+            if self._pw is not None:
+                with contextlib.suppress(Exception):
+                    self._pw.stop()
+            if self._temp_dir is not None:
+                with contextlib.suppress(Exception):
+                    self._temp_dir.cleanup()
 
     return _Session()

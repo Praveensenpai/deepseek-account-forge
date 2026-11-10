@@ -11,6 +11,7 @@ from patchright.sync_api import Page
 from .age import AgeError, complete_age_if_present
 from .auth_wait import AuthError, require_success
 from .browser import LaunchOptions, open_session
+from .cooldown import check_b11_cooldown
 from .credentials import DEFAULT_CRED_PATH, increment_counter, load_credentials
 from .delete_account import DeleteError, run_delete
 from .gateway import DEFAULT_GATEWAY_KEY, DEFAULT_GATEWAY_URL, push_token_to_gateway
@@ -19,7 +20,7 @@ from .navigate import DEFAULT_OUT_DIR, capture, extract_json, open_page, wait_fo
 from .signin import handle_verify_modal_if_present, run_signin
 from .signup import EMAIL_SELECTOR, run_signup
 from .state import SessionState, detect_state, report_state
-from .token import DEFAULT_TOKEN_PATH, extract_user_token, save_user_token
+from .token import DEFAULT_TOKEN_PATH, extract_user_token
 from .verify import report_verification, verify_token
 
 SIGNUP_URL = "https://chat.deepseek.com/sign_up"
@@ -111,6 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not push extracted tokens to the deeperseeker-rs gateway.",
     )
     parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompt if B11 cooldown is active.",
+    )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help="Optional directory to persist browser profile across runs (default: ephemeral).",
+    )
+    parser.add_argument(
         "--delete-account",
         action="store_true",
         help="Open Settings -> Profile -> Delete and stop at the confirmation dialog.",
@@ -135,10 +148,6 @@ def _extract_and_verify(
     """Extract the userToken, prove it against the API, and push to gateway."""
     auth = extract_user_token(page, token_out)
     report_verification(verify_token(auth.user_token))
-    if index is not None:
-        indexed_path = token_out.parent / f"auth_{index}.json"
-        save_user_token(auth.user_token, indexed_path)
-        print(f"[token] indexed token saved to {indexed_path}")
     if sync_gateway:
         alias = email or (f"index-{index}" if index is not None else "primary")
         push_token_to_gateway(auth.user_token, alias=alias, url=gateway_url, api_key=gateway_key)
@@ -248,9 +257,14 @@ def run(
     gateway_url: str = DEFAULT_GATEWAY_URL,
     gateway_key: str = DEFAULT_GATEWAY_KEY,
     no_gateway: bool = False,
+    profile: Path | None = None,
+    yes: bool = False,
 ) -> int:
     """Execute a single run."""
-    options = LaunchOptions.from_env(isolated=register)
+    if register and not check_b11_cooldown(force=yes):
+        print("[deepseek-forge] registration aborted due to active B11 cooldown")
+        return 0
+    options = LaunchOptions.from_env(profile=profile)
     effective_url = url or (SIGNIN_URL if login else (SIGNUP_URL if register else CHAT_URL))
     raw_creds = load_credentials(cred_path)
     eff_index = index if index is not None else raw_creds.counter
@@ -320,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             args.gateway_url,
             args.gateway_key,
             args.no_gateway,
+            args.profile,
+            args.yes,
         )
     except KeyboardInterrupt:
         return 130

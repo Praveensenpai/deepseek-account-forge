@@ -13,6 +13,7 @@ from enum import Enum
 
 from patchright.sync_api import Page
 
+from .cooldown import record_b11
 from .state import SessionState, detect_state
 
 CF_OVERLAY_SELECTOR = "#cf-overlay"
@@ -107,5 +108,7 @@ def require_success(page: Page, action: str, timeout_ms: int = SUCCESS_TIMEOUT_M
     if result.ok:
         print(f"[{action}] authenticated")
         return
+    if "B11" in result.message:
+        record_b11()
     detail = f": {result.message}" if result.message else ""
     raise AuthError(f"{action} failed ({result.outcome.value}){detail}")
