@@ -10,6 +10,7 @@ from patchright.sync_api import Page
 from .age import complete_age_if_present
 from .auth_wait import require_success
 from .credentials import Credentials
+from .identity import reset_device_fingerprints
 from .otp_mail import MailConfig, OtpMailError, fetch_latest_otp
 
 EMAIL_SELECTOR = 'input[placeholder="Email address"]'
@@ -103,18 +104,7 @@ def run_signup(page: Page, creds: Credentials, otp: str | None = None) -> None:
     Raises AuthError when the submit does not reach a logged-in state, so a
     duplicate email, bad OTP, or Turnstile block is never reported as success.
     """
-
-    def _on_response(resp: object) -> None:
-        try:
-            url = getattr(resp, "url", "")
-            if "/api/v0/users/register" in url:
-                status = getattr(resp, "status", 0)
-                body = getattr(resp, "text", lambda: "")()
-                print(f"[signup] register API response ({status}): {body[:300]}")
-        except Exception:
-            pass
-
-    page.on("response", _on_response)
+    reset_device_fingerprints(page)
     fill_credentials(page, creds)
     # Cutoff for the OTP: only mail that arrives after this click is valid.
     requested_at = datetime.now(UTC)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,12 +22,6 @@ def record_b11(
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except OSError as exc:
         print(f"[cooldown] failed to record B11 state: {exc}")
-
-
-def clear_b11(path: Path = DEFAULT_STATE_PATH) -> None:
-    """Clear recorded B11 state upon successful authentication."""
-    with contextlib.suppress(OSError):
-        path.unlink(missing_ok=True)
 
 
 def get_last_b11(path: Path = DEFAULT_STATE_PATH) -> datetime | None:

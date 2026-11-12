@@ -33,8 +33,8 @@ class LaunchOptions:
     headless: bool = False
     user_data_dir: Path | None = None
     timeout_ms: int = DEFAULT_TIMEOUT_MS
-    locale: str | None = None
-    timezone: str | None = None
+    locale: str = "en-US"
+    timezone: str = "America/New_York"
 
     @classmethod
     def from_env(cls, profile: Path | None = None) -> LaunchOptions:
@@ -42,7 +42,6 @@ class LaunchOptions:
 
         If profile is provided or STEALTH_PROFILE is set, persists to that directory.
         Otherwise defaults to None, provisioning a clean ephemeral directory.
-        Timezone and locale default to None to inherit host OS settings matching the IP.
         """
         headless = os.environ.get("HEADLESS", "").lower() in {"1", "true", "yes"}
         env_profile = os.environ.get("STEALTH_PROFILE")
@@ -51,9 +50,7 @@ class LaunchOptions:
             target_dir = profile.expanduser()
         elif env_profile:
             target_dir = Path(env_profile).expanduser()
-        locale = os.environ.get("LOCALE") or None
-        timezone = os.environ.get("TIMEZONE") or None
-        return cls(headless=headless, user_data_dir=target_dir, locale=locale, timezone=timezone)
+        return cls(headless=headless, user_data_dir=target_dir)
 
 
 def _sanitize_preferences(user_data_dir: Path) -> None:
@@ -93,27 +90,26 @@ def launch_context(playwright: Playwright, options: LaunchOptions) -> BrowserCon
     assert options.user_data_dir is not None
     options.user_data_dir.mkdir(parents=True, exist_ok=True)
     _sanitize_preferences(options.user_data_dir)
-    context_kwargs: dict[str, object] = {
-        "user_data_dir": str(options.user_data_dir),
-        "headless": options.headless,
-        "channel": "chrome",
-        "viewport": DEFAULT_VIEWPORT,
-        "ignore_default_args": ["--enable-automation"],
-        "args": [
+    context = playwright.chromium.launch_persistent_context(
+        user_data_dir=str(options.user_data_dir),
+        headless=options.headless,
+        channel="chrome",
+        # Pin the layout size instead of following the OS window. Some window
+        # managers ignore --window-size, which collapses DeepSeek's left rail
+        # off-screen (negative x) and hides the account control.
+        viewport=DEFAULT_VIEWPORT,
+        locale=options.locale,
+        timezone_id=options.timezone,
+        args=[
             "--disable-blink-features=AutomationControlled",
             f"--window-size={DEFAULT_VIEWPORT['width']},{DEFAULT_VIEWPORT['height']}",
             "--no-first-run",
             "--no-default-browser-check",
             "--hide-crash-restore-bubble",
             "--password-store=basic",
+            "--test-type",
         ],
-    }
-    if options.locale is not None:
-        context_kwargs["locale"] = options.locale
-    if options.timezone is not None:
-        context_kwargs["timezone_id"] = options.timezone
-
-    context = playwright.chromium.launch_persistent_context(**context_kwargs)  # type: ignore[arg-type]
+    )
     context.set_default_timeout(options.timeout_ms)
     return context
 
