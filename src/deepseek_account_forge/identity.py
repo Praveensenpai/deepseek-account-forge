@@ -16,13 +16,6 @@ from .state import SessionState, detect_state
 ACCOUNT_LABEL_SELECTOR = "div._9d8da05"
 SESSION_COOKIE_NAMES = ("ds_session_id",)
 SESSION_STORAGE_KEYS = ("userToken",)
-DEVICE_TRACKING_PREFIXES = (
-    "deepseek-device-id",
-    "__tea_cache",
-    "APMPLUS",
-    "__ds_remote_feature_did",
-    "hif_",
-)
 MAX_CLEAR_ATTEMPTS = 2
 
 
@@ -82,18 +75,6 @@ def read_session_email(page: Page) -> str | None:
     except Exception:
         return None
     return None
-
-
-def reset_device_fingerprints(page: Page) -> None:
-    """Clear device and analytics tracking keys to prevent B11 risk device flags."""
-    prefixes_js = ", ".join(f'"{p}"' for p in DEVICE_TRACKING_PREFIXES)
-    page.evaluate(
-        f"() => {{ const prefixes = [{prefixes_js}]; "
-        "for (let i = localStorage.length - 1; i >= 0; i--) { "
-        "const key = localStorage.key(i); "
-        "if (key && prefixes.some(p => key.startsWith(p) || key.includes(p))) "
-        "localStorage.removeItem(key); } }"
-    )
 
 
 def clear_account_session(context: BrowserContext, page: Page) -> None:
